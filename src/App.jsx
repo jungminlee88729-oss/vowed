@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { WeddingProvider, useWedding } from './context/WeddingContext'
+import PasswordGate from './components/PasswordGate'
 import TopBar from './components/TopBar'
 import AiCoach from './sections/AiCoach'
 import WeddingChecklist from './sections/WeddingChecklist'
@@ -237,8 +238,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <WeddingProvider>
-      <AppContent />
-    </WeddingProvider>
+    <PasswordGate>
+      <WeddingProvider>
+        <AppContent />
+      </WeddingProvider>
+    </PasswordGate>
   )
 }

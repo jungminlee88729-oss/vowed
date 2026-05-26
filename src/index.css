@@ -66,6 +66,16 @@ body {
   to   { opacity: 1; transform: translateY(0);   }
 }
 
+/* Password gate — wrong password input shake */
+@keyframes vovedShake {
+  0%, 100% { transform: translateX(0);   }
+  18%       { transform: translateX(-9px); }
+  36%       { transform: translateX(8px);  }
+  54%       { transform: translateX(-6px); }
+  72%       { transform: translateX(5px);  }
+  90%       { transform: translateX(-2px); }
+}
+
 /* Smooth cursor blink for streaming text */
 @keyframes blink {
   0%, 100% { opacity: 1; }
