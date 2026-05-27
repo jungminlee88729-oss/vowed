@@ -4,7 +4,12 @@ import { useWedding } from '../context/WeddingContext'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-const PERSON_ICON = { JungMin: '👰', 'Jin Won': '🤵', Both: '👰🤵' }
+// Built dynamically inside the component from brideName / groomName context
+function buildPersonIcon(brideName, groomName) {
+  const b = brideName || 'Bride'
+  const g = groomName || 'Groom'
+  return { [b]: '👰', [g]: '🤵', Both: '👰🤵', JungMin: '👰', 'Jin Won': '🤵' }
+}
 
 const STATUS_CFG = {
   paid:          { label: 'Completed ✓',      color: '#166534', bg: '#DCFCE7' },
@@ -305,9 +310,9 @@ function VendorModal({ initial, onSave, onClose }) {
               </label>
               <div className="flex gap-1.5 h-[42px] items-center">
                 {[
-                  { name: 'JungMin', icon: '👰' },
-                  { name: 'Jin Won', icon: '🤵' },
-                  { name: 'Both',    icon: '👰🤵' },
+                  { name: bride, icon: '👰' },
+                  { name: groom, icon: '🤵' },
+                  { name: 'Both', icon: '👰🤵' },
                 ].map(({ name, icon }) => {
                   const active = form.assignedTo === name
                   return (
@@ -532,7 +537,12 @@ export default function FinanceTracker() {
     budget, setBudget,
     vendors, addVendor, updateVendor, removeVendor, reorderVendors,
     messages, extractAndUpdate,
+    brideName, groomName,
   } = useWedding()
+
+  const PERSON_ICON = buildPersonIcon(brideName, groomName)
+  const bride = brideName || 'Bride'
+  const groom = groomName || 'Groom'
 
   const [showModal,  setShowModal]  = useState(false)
   const [editVendor, setEditVendor] = useState(null)

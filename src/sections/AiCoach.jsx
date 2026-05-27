@@ -5,33 +5,35 @@ import { useWedding } from '../context/WeddingContext'
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-function buildSystemPrompt({ weddingDate, weddingLocation, guestCount, weddingStyle }) {
+function buildSystemPrompt({ brideName, groomName, weddingDate, weddingLocation, guestCount, weddingStyle, budget }) {
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   })
 
-  // Build couple profile — fall back to their stated details if not yet extracted
-  const location = weddingLocation || 'New York City'
-  const guests   = guestCount      || 80
-  const style    = weddingStyle?.length ? weddingStyle.join(', ') : 'romantic outdoor garden'
-  const dateStr  = weddingDate
+  const bride     = brideName       || 'the bride'
+  const groom     = groomName       || 'the groom'
+  const names     = brideName && groomName ? `${brideName} and ${groomName}` : 'the couple'
+  const location  = weddingLocation || 'their city'
+  const guests    = guestCount      || 80
+  const style     = weddingStyle?.length ? weddingStyle.join(', ') : 'their vision'
+  const budgetFmt = budget ? `$${Number(budget).toLocaleString()}` : '$30,000'
+  const dateStr   = weddingDate
     ? new Date(weddingDate + 'T00:00:00').toLocaleDateString('en-US', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
       })
-    : 'Saturday, May 15, 2027'
+    : 'their wedding date'
 
   return `Today is ${today}.
 
 COUPLE PROFILE — use this in every answer, every search, every recommendation:
-Names: JungMin and Jin Won
+Names: ${bride} and ${groom}
 Wedding date: ${dateStr}
 City / region: ${location}
 Guest count: ~${guests}
-Ceremony: Catholic church
 Reception style: ${style}
-Total budget: $30,000
+Total budget: ${budgetFmt}
 
-You are the Vowed Wedding Coordinator, a warm, knowledgeable wedding planning coach for JungMin and Jin Won. You never make decisions for the couple — you guide them. Every answer must feel tailored to their specific situation: their city, guest count, $30,000 total budget (which must cover everything — venue, food, flowers, photos, music, attire, and more), their Catholic ceremony, their outdoor garden vision, and their May 2027 date.
+You are the Vowed Wedding Coordinator, a warm, knowledgeable wedding planning coach for ${names}. You never make decisions for the couple — you guide them. Every answer must feel tailored to their specific situation: their city, guest count, ${budgetFmt} total budget (which must cover everything — venue, food, flowers, photos, music, attire, and more), and their ${style} vision.
 
 You know that wedding planning has a timeline with dependencies. Venue, photographer, and caterer must be booked 12+ months ahead. Final fittings, seating plans, and vendor confirmations happen 4–6 weeks before. Always tell them not just WHAT to plan but WHEN, given their specific date.
 
@@ -39,13 +41,12 @@ You know that wedding planning has a timeline with dependencies. Venue, photogra
 
 MANDATORY WEB SEARCH — you MUST call web_search before answering any question about:
 • Prices, costs, or budget estimates for any wedding element — never quote figures from memory
-• Venues, vendors, caterers, photographers, florists, musicians — especially NYC-specific
+• Venues, vendors, caterers, photographers, florists, musicians — especially location-specific
 • How far in advance to book or plan anything
 • What questions to ask vendors before signing
 • Day-of timelines, ceremony structure, logistics
 • Popular choices (songs, flowers, themes, menus, cakes)
-• Seasonal realities (outdoor wedding in NYC in May — weather, permits, backup plans)
-• Catholic ceremony requirements: pre-Cana classes, booking timeline, church availability
+• Seasonal realities (outdoor weddings — weather, permits, backup plans)
 
 The web_search tool is available to you — use it every time one of the above topics comes up. Search first, reason second, respond third. Do NOT answer pricing, vendor, or timing questions from training data alone.
 
@@ -54,10 +55,10 @@ SKIP search only for: simple emotional moments ("we're so excited!"), tasks they
 RESEARCH RESPONSE STRUCTURE — when you have searched the web:
 1. What you found — 1–2 direct sentences stating the key facts
 2. 2–3 specific options or real examples with actual details — names, price ranges, timelines
-3. "What this means for JungMin and Jin Won" — connect everything to their $30k budget, ${guests} guests, ${location} location, and ${style} style
+3. "What this means for ${names}" — connect everything to their ${budgetFmt} budget, ${guests} guests, ${location} location, and ${style} style
 4. One natural follow-up question woven into prose
 
-ALWAYS EXPLAIN YOUR REASONING — always tell them WHY you are recommending what you are recommending. Be specific: "I'm suggesting these three venues because they can accommodate ${guests} guests outdoors, they fall within the budget range that leaves room for your other vendors, and they have the garden aesthetic you're going for." Never just list options without explaining the reasoning behind the selection.
+ALWAYS EXPLAIN YOUR REASONING — always tell them WHY you are recommending what you are recommending. Be specific: "I'm suggesting these three venues because they can accommodate ${guests} guests, they fall within the budget range that leaves room for your other vendors, and they match the aesthetic you're going for." Never just list options without explaining the reasoning behind the selection.
 
 ─── CONVERSATION STYLE ────────────────────────────────────────────────
 
@@ -280,8 +281,9 @@ function CoachAvatar() {
   )
 }
 
-function UserAvatar({ sender }) {
-  const color = sender === 'JungMin' ? '#B4627A' : '#5A7A6A'
+function UserAvatar({ sender, brideName }) {
+  // Bride gets rose, everyone else gets sage
+  const color = sender === brideName ? '#B4627A' : '#5A7A6A'
   return (
     <div
       className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-[22px] text-xs font-semibold select-none"
@@ -344,8 +346,8 @@ function AiMessage({ message, showChips, isStreaming, onChipClick }) {
   )
 }
 
-function UserMessage({ message }) {
-  const color = message.sender === 'JungMin' ? '#B4627A' : '#5A7A6A'
+function UserMessage({ message, brideName }) {
+  const color = message.sender === brideName ? '#B4627A' : '#5A7A6A'
   return (
     <div className="flex items-start justify-end gap-3">
       <div className="flex flex-col items-end gap-1.5 min-w-0" style={{ maxWidth: 'min(78%, 560px)' }}>
@@ -388,14 +390,16 @@ function SuggestionChip({ label, onClick }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AiCoach() {
-  const activeUser = 'JungMin'   // toggle removed; kept internally for message sender colour
   const {
     messages, setMessages,
     pendingQuestion, setPendingQuestion,
-    weddingDate, weddingLocation, guestCount, weddingStyle,
+    brideName, groomName,
+    weddingDate, weddingLocation, guestCount, weddingStyle, budget,
     extractAndUpdate,
     persistMessage,
   } = useWedding()
+
+  const activeUser = brideName || 'You'
 
   const [input,            setInput]            = useState('')
   const [isTyping,         setIsTyping]         = useState(false)
@@ -465,7 +469,7 @@ export default function AiCoach() {
         model:      'claude-sonnet-4-5',
         max_tokens: 2048,
         tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
-        system:     buildSystemPrompt({ weddingDate, weddingLocation, guestCount, weddingStyle }),
+        system:     buildSystemPrompt({ brideName, groomName, weddingDate, weddingLocation, guestCount, weddingStyle, budget }),
         messages:   apiMessages,
       })
 
@@ -558,7 +562,7 @@ export default function AiCoach() {
       ])
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, activeUser, isBusy, weddingDate, weddingLocation, guestCount, weddingStyle])
+  }, [messages, activeUser, isBusy, brideName, groomName, weddingDate, weddingLocation, guestCount, weddingStyle, budget])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -616,7 +620,7 @@ export default function AiCoach() {
               onChipClick={sendMessage}
             />
           ) : (
-            <UserMessage key={msg.id} message={msg} />
+            <UserMessage key={msg.id} message={msg} brideName={brideName} />
           )
         )}
         {isTyping      && <TypingIndicator />}
@@ -686,7 +690,7 @@ export default function AiCoach() {
           Speaking as{' '}
           <span
             className="font-medium"
-            style={{ color: activeUser === 'JungMin' ? '#B4627A' : '#5A7A6A' }}
+            style={{ color: '#B4627A' }}
           >
             {activeUser}
           </span>

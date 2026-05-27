@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react'
 import {
   ChevronLeft, ChevronRight, Heart, Sparkles, X, Plus, RefreshCw,
   MapPin, Phone, Globe, FileText, DollarSign,
@@ -12,28 +12,40 @@ const MONTHS   = ['January','February','March','April','May','June',
 
 // ─── Person × type colour matrix ────────────────────────────────────────────
 
-const PERSON_COLORS = {
-  JungMin: {
-    task:     { bg: '#FDF4F6', color: '#C07E95', border: '#ECC5D0' },
-    deadline: { bg: '#F9E0E8', color: '#B4627A', border: '#DFA5B5' },
-    event:    { bg: '#F0C4D0', color: '#8B3A52', border: '#CC8FA0' },
-    base:     '#B4627A',
-  },
-  'Jin Won': {
-    task:     { bg: '#F0F7F4', color: '#6E9E8C', border: '#BCD9CE' },
-    deadline: { bg: '#DEF0E8', color: '#4A7A65', border: '#95C4AF' },
-    event:    { bg: '#C4DED4', color: '#2E5E4A', border: '#7EB9A5' },
-    base:     '#4A7A65',
-  },
-  Both: {
-    task:     { bg: '#FDF9ED', color: '#B09040', border: '#EDD89A' },
-    deadline: { bg: '#FBF0D0', color: '#9A7820', border: '#E5C870' },
-    event:    { bg: '#F2E0A0', color: '#7A5C10', border: '#D4B050' },
-    base:     '#9A7820',
-  },
+const BRIDE_COLORS = {
+  task:     { bg: '#FDF4F6', color: '#C07E95', border: '#ECC5D0' },
+  deadline: { bg: '#F9E0E8', color: '#B4627A', border: '#DFA5B5' },
+  event:    { bg: '#F0C4D0', color: '#8B3A52', border: '#CC8FA0' },
+  base:     '#B4627A',
+}
+const GROOM_COLORS = {
+  task:     { bg: '#F0F7F4', color: '#6E9E8C', border: '#BCD9CE' },
+  deadline: { bg: '#DEF0E8', color: '#4A7A65', border: '#95C4AF' },
+  event:    { bg: '#C4DED4', color: '#2E5E4A', border: '#7EB9A5' },
+  base:     '#4A7A65',
+}
+const BOTH_COLORS = {
+  task:     { bg: '#FDF9ED', color: '#B09040', border: '#EDD89A' },
+  deadline: { bg: '#FBF0D0', color: '#9A7820', border: '#E5C870' },
+  event:    { bg: '#F2E0A0', color: '#7A5C10', border: '#D4B050' },
+  base:     '#9A7820',
 }
 
-const PERSON_ICON = { JungMin: '👰', 'Jin Won': '🤵', Both: '👰🤵' }
+function buildPersonColors(bride, groom) {
+  return {
+    [bride]: BRIDE_COLORS, [groom]: GROOM_COLORS, Both: BOTH_COLORS,
+    JungMin: BRIDE_COLORS, 'Jin Won': GROOM_COLORS, // legacy keys for existing data
+  }
+}
+
+function buildPersonIcon(bride, groom) {
+  return { [bride]: '👰', [groom]: '🤵', Both: '👰🤵', JungMin: '👰', 'Jin Won': '🤵' }
+}
+
+// ─── Calendar-scoped person context ─────────────────────────────────────────
+
+const CalendarPeopleCtx = createContext(null)
+function useCalendarPeople() { return useContext(CalendarPeopleCtx) }
 
 function normalizeType(type) {
   if (type === 'vendor')  return 'event'
@@ -42,11 +54,11 @@ function normalizeType(type) {
   return 'event'
 }
 
-function getEventCfg(event) {
+function getEventCfg(event, personColors) {
   const type = normalizeType(event.type)
   if (type === 'wedding') return { bg: '#FBE8EE', color: '#B4627A', border: '#E8B4C3' }
   const person = event.assignedTo || 'Both'
-  return (PERSON_COLORS[person] ?? PERSON_COLORS.Both)[type] ?? PERSON_COLORS.Both.event
+  return (personColors[person] ?? personColors.Both)[type] ?? personColors.Both.event
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -81,6 +93,7 @@ function mapsUrl(address) {
 // ─── EventTooltip (hover, no pointer events) ─────────────────────────────────
 
 function EventTooltip({ tooltip, onMouseEnter, onMouseLeave }) {
+  const { personIcon } = useCalendarPeople()
   if (!tooltip) return null
   const { event, x, y } = tooltip
 
@@ -123,7 +136,7 @@ function EventTooltip({ tooltip, onMouseEnter, onMouseLeave }) {
             style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}
           >
             <span style={{ fontSize: '13px', lineHeight: 1 }}>
-              {PERSON_ICON[event.assignedTo] ?? '👰🤵'}
+              {personIcon[event.assignedTo] ?? '👰🤵'}
             </span>
             <span className="text-xs font-medium" style={{ color: 'rgba(253,250,248,0.65)', fontFamily: 'var(--font-body)' }}>
               {event.assignedTo || 'Both'}
@@ -196,11 +209,12 @@ function EventTooltip({ tooltip, onMouseEnter, onMouseLeave }) {
 // ─── EventDetailModal (click to open) ────────────────────────────────────────
 
 function EventDetailModal({ event, onClose, onRemove }) {
+  const { personColors, personIcon } = useCalendarPeople()
   if (!event) return null
 
-  const cfg    = getEventCfg(event)
+  const cfg    = getEventCfg(event, personColors)
   const type   = normalizeType(event.type)
-  const icon   = type !== 'wedding' ? (PERSON_ICON[event.assignedTo] ?? PERSON_ICON.Both) : null
+  const icon   = type !== 'wedding' ? (personIcon[event.assignedTo] ?? personIcon.Both) : null
   const isWedding  = type === 'wedding'
   const isFinance  = !!event.fromFinance
 
@@ -381,10 +395,11 @@ function EventDetailModal({ event, onClose, onRemove }) {
 // ─── EventPill ───────────────────────────────────────────────────────────────
 
 function EventPill({ event, onShowTooltip, onHideTooltip, onClickEvent }) {
+  const { personColors, personIcon } = useCalendarPeople()
   const ref  = useRef(null)
-  const cfg  = getEventCfg(event)
+  const cfg  = getEventCfg(event, personColors)
   const type = normalizeType(event.type)
-  const icon = type !== 'wedding' ? (PERSON_ICON[event.assignedTo] ?? PERSON_ICON.Both) : null
+  const icon = type !== 'wedding' ? (personIcon[event.assignedTo] ?? personIcon.Both) : null
 
   const handleMouseEnter = () => {
     if (ref.current) {
@@ -632,6 +647,7 @@ function AddressAutocomplete({ value, onChange, inputStyle }) {
 // ─── AddEventModal ────────────────────────────────────────────────────────────
 
 function AddEventModal({ date, onSave, onClose }) {
+  const { personColors, bride, groom } = useCalendarPeople()
   const [title,      setTitle]      = useState('')
   const [assignedTo, setAssignedTo] = useState('Both')
   const [address,    setAddress]    = useState('')
@@ -720,12 +736,12 @@ function AddEventModal({ date, onSave, onClose }) {
             </label>
             <div className="flex gap-2">
               {[
-                { name: 'JungMin', icon: '👰' },
-                { name: 'Jin Won', icon: '🤵' },
-                { name: 'Both',    icon: '👰🤵' },
+                { name: bride, icon: '👰' },
+                { name: groom, icon: '🤵' },
+                { name: 'Both', icon: '👰🤵' },
               ].map(({ name, icon }) => {
                 const active    = assignedTo === name
-                const baseColor = (PERSON_COLORS[name] ?? PERSON_COLORS.Both).base
+                const baseColor = (personColors[name] ?? personColors.Both).base
                 return (
                   <button
                     key={name}
@@ -834,9 +850,10 @@ function AddEventModal({ date, onSave, onClose }) {
 // ─── AgendaRow ────────────────────────────────────────────────────────────────
 
 function AgendaRow({ event, onRemove, onClickEvent }) {
-  const cfg       = getEventCfg(event)
+  const { personColors, personIcon } = useCalendarPeople()
+  const cfg       = getEventCfg(event, personColors)
   const type      = normalizeType(event.type)
-  const icon      = type !== 'wedding' ? (PERSON_ICON[event.assignedTo] ?? PERSON_ICON.Both) : null
+  const icon      = type !== 'wedding' ? (personIcon[event.assignedTo] ?? personIcon.Both) : null
   const days      = daysAway(event.date)
   const when      = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `In ${days} days`
   const urgent    = days <= 7
@@ -930,10 +947,11 @@ function AgendaRow({ event, onRemove, onClickEvent }) {
 // ─── Legend ───────────────────────────────────────────────────────────────────
 
 function Legend() {
+  const { personColors, bride, groom } = useCalendarPeople()
   const items = [
-    { icon: '👰',  label: 'JungMin', color: PERSON_COLORS.JungMin.base,   bg: PERSON_COLORS.JungMin.event.bg   },
-    { icon: '🤵',  label: 'Jin Won', color: PERSON_COLORS['Jin Won'].base, bg: PERSON_COLORS['Jin Won'].event.bg },
-    { icon: '👰🤵', label: 'Both',   color: PERSON_COLORS.Both.base,       bg: PERSON_COLORS.Both.event.bg      },
+    { icon: '👰',  label: bride, color: personColors[bride].base, bg: personColors[bride].event.bg },
+    { icon: '🤵',  label: groom, color: personColors[groom].base, bg: personColors[groom].event.bg },
+    { icon: '👰🤵', label: 'Both', color: personColors.Both.base,  bg: personColors.Both.event.bg  },
   ]
   return (
     <div className="flex items-center gap-3 flex-wrap">
@@ -960,7 +978,13 @@ export default function Calendar() {
   const {
     weddingDate, calendarEvents, addCalendarEvent, removeCalendarEvent,
     messages, extractAndUpdate, vendors,
+    brideName, groomName,
   } = useWedding()
+
+  const bride        = brideName || 'Bride'
+  const groom        = groomName || 'Groom'
+  const personColors = useMemo(() => buildPersonColors(bride, groom), [bride, groom])
+  const personIcon   = useMemo(() => buildPersonIcon(bride, groom),   [bride, groom])
 
   const [syncing,     setSyncing]     = useState(false)
   const [syncMsg,     setSyncMsg]     = useState(null)
@@ -1132,6 +1156,7 @@ export default function Calendar() {
     viewMonth === new Date(weddingStr + 'T00:00:00').getMonth()
 
   return (
+    <CalendarPeopleCtx.Provider value={{ personColors, personIcon, bride, groom }}>
     <div className="flex-1 flex flex-col overflow-hidden">
 
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
@@ -1298,5 +1323,6 @@ export default function Calendar() {
         />
       )}
     </div>
+    </CalendarPeopleCtx.Provider>
   )
 }

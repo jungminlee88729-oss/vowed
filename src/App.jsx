@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from 'react'
 import { WeddingProvider, useWedding } from './context/WeddingContext'
-import PasswordGate from './components/PasswordGate'
+import AuthGate from './components/AuthGate'
 import TopBar from './components/TopBar'
+import SettingsPanel from './components/SettingsPanel'
 import AiCoach from './sections/AiCoach'
 import WeddingChecklist from './sections/WeddingChecklist'
 import Calendar from './sections/Calendar'
@@ -102,7 +103,7 @@ function GripDots() {
 
 // ─── App shell ────────────────────────────────────────────────────────────────
 
-function AppContent() {
+function AppContent({ settingsOpen, onOpenSettings, onCloseSettings }) {
   const [rightTab, setRightTab] = useState('checklist')
 
   // Initialise to half the viewport; clamped to minimum
@@ -145,8 +146,11 @@ function AppContent() {
   return (
     <div className="flex flex-col h-screen" style={{ backgroundColor: '#FDFAF8' }}>
 
+      {/* ── Settings panel overlay ── */}
+      {settingsOpen && <SettingsPanel onClose={onCloseSettings} />}
+
       {/* ── Full-width dark top bar ── */}
-      <TopBar />
+      <TopBar onOpenSettings={onOpenSettings} />
 
       {/* ── Two-column body ── */}
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
@@ -237,11 +241,40 @@ function AppContent() {
 }
 
 export default function App() {
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // Read onboarding data from localStorage (set by AuthGate after signup).
+  // We read it once and clear it so subsequent logins don't reuse it.
+  const initialProfileRef    = useRef(null)
+  const initialProfileChecked = useRef(false)
+
   return (
-    <PasswordGate>
-      <WeddingProvider>
-        <AppContent />
-      </WeddingProvider>
-    </PasswordGate>
+    <AuthGate>
+      {(userId, userEmail) => {
+        if (!initialProfileChecked.current) {
+          initialProfileChecked.current = true
+          try {
+            const raw = localStorage.getItem('vowed_pending_profile')
+            if (raw) {
+              initialProfileRef.current = JSON.parse(raw)
+              localStorage.removeItem('vowed_pending_profile')
+            }
+          } catch (_) {}
+        }
+        return (
+          <WeddingProvider
+            userId={userId}
+            userEmail={userEmail}
+            initialProfile={initialProfileRef.current}
+          >
+            <AppContent
+              settingsOpen={settingsOpen}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onCloseSettings={() => setSettingsOpen(false)}
+            />
+          </WeddingProvider>
+        )
+      }}
+    </AuthGate>
   )
 }

@@ -28,22 +28,59 @@ function logWrite(table, label, error) {
 // ─── Context ──────────────────────────────────────────────────────────────────
 const WeddingContext = createContext(null)
 
-export function WeddingProvider({ children }) {
+// ─── Generate personalised welcome message ────────────────────────────────────
+function generateWelcomeMessage(profile) {
+  const { brideName, groomName, weddingDate, weddingLocation, weddingStyle, guestCount } = profile || {}
+
+  if (!brideName && !groomName) return INITIAL_AI_MESSAGE.content
+
+  const names = [brideName, groomName].filter(Boolean).join(' & ')
+
+  let dateStr = ''
+  if (weddingDate) {
+    try {
+      const [y, m, d] = weddingDate.split('-').map(Number)
+      dateStr = new Date(y, m - 1, d).toLocaleDateString('en-US', {
+        month: 'long', day: 'numeric', year: 'numeric',
+      })
+    } catch (_) {}
+  }
+
+  const locationStr = weddingLocation || ''
+  const visionStr   = weddingStyle?.length
+    ? weddingStyle.slice(0, 2).join(' & ').toLowerCase()
+    : 'beautiful'
+  const guestStr    = guestCount ? `, ${guestCount} guests` : ''
+  const contextStr  = dateStr && locationStr ? `your ${locationStr} wedding on ${dateStr}`
+                    : dateStr                ? `your wedding on ${dateStr}`
+                    : locationStr            ? `your ${locationStr} wedding`
+                    :                          'your wedding'
+
+  return `Hi ${names}! I'm so excited to help you plan ${contextStr}${guestStr}! 🎉
+
+Based on your ${visionStr} vision, here's where I'd focus first:
+
+**Venue** sets the tone for everything and books up fastest — especially for ${dateStr ? `a ${dateStr.split(',')[0]} date` : 'your date'}. **Photography** goes next, since the best photographers book 12–18 months out. Once you have your venue confirmed, **catering** and your **guest list** will fall naturally into place.
+
+What feels most exciting or most overwhelming right now? I'm here to help you take it one step at a time! 💕`
+}
+
+export function WeddingProvider({ children, userId, userEmail, initialProfile }) {
 
   // ── UI renders immediately — no loading gate ──────────────────────────────
-  // loading is only used by panels that want to show a subtle spinner.
-  // It is never used to block the whole app from rendering.
   const [loading, setLoading] = useState(false)
 
   // ── Navigation ───────────────────────────────────────────────────────────────
   const [activeSection, setActiveSection] = useState('ai-coach')
-  const [activeUser,    setActiveUser]    = useState('JungMin')
+  const [activeUser,    setActiveUser]    = useState(null) // set from brideName after load
 
   // ── Chat ─────────────────────────────────────────────────────────────────────
   const [messages,        setMessages]        = useState([INITIAL_AI_MESSAGE])
   const [pendingQuestion, setPendingQuestion] = useState(null)
 
   // ── Wedding facts ─────────────────────────────────────────────────────────────
+  const [brideName,       setBrideName]       = useState('')
+  const [groomName,       setGroomName]       = useState('')
   const [weddingDate,     setWeddingDate]     = useState('')
   const [weddingLocation, setWeddingLocation] = useState('')
   const [guestCount,      setGuestCount]      = useState(null)
@@ -82,13 +119,14 @@ export function WeddingProvider({ children }) {
     if (!dbReadyRef.current || !profileIdRef.current) return
     const timer = setTimeout(async () => {
       const payload = {
+        bride_name:       brideName       || null,
+        groom_name:       groomName       || null,
         wedding_date:     weddingDate     || null,
         wedding_location: weddingLocation || null,
         guest_count:      guestCount,
         wedding_style:    weddingStyle,
         budget,
       }
-      console.log('[Vowed] WRITE couple_profile (auto-save):', payload)
       const { error } = await supabase
         .from('couple_profile')
         .update(payload)
@@ -97,41 +135,52 @@ export function WeddingProvider({ children }) {
     }, 1000)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weddingDate, weddingLocation, guestCount, weddingStyle, budget])
+  }, [brideName, groomName, weddingDate, weddingLocation, guestCount, weddingStyle, budget])
 
   // ── Seed helpers — each seeds only its own table(s) ─────────────────────────
-  // Called individually based on which tables are actually empty.
 
-  async function seedProfile() {
+  async function seedProfile(profile) {
     console.log('[Vowed] Seeding couple_profile...')
+    const row = {
+      user_id:          userId,
+      bride_name:       profile?.brideName       || null,
+      groom_name:       profile?.groomName       || null,
+      budget:           profile?.budget != null ? Number(profile.budget) : DEFAULT_BUDGET,
+      guest_count:      profile?.guestCount      ?? 80,
+      wedding_style:    profile?.weddingStyle    ?? [],
+      wedding_date:     profile?.weddingDate     || null,
+      wedding_location: profile?.weddingLocation || null,
+    }
     const { data, error } = await supabase
       .from('couple_profile')
-      .insert({ budget: DEFAULT_BUDGET, guest_count: 80, wedding_style: [] })
+      .insert(row)
       .select()
       .single()
     logWrite('couple_profile', 'seed', error)
     if (data) profileIdRef.current = data.id
   }
 
-  async function seedMessages() {
+  async function seedMessages(profile) {
     console.log('[Vowed] Seeding chat_messages...')
+    const content = generateWelcomeMessage(profile)
     const { error } = await supabase.from('chat_messages').insert({
-      id:      INITIAL_AI_MESSAGE.id,
+      id:      `init-${userId.slice(0, 8)}`,
       role:    INITIAL_AI_MESSAGE.role,
-      content: INITIAL_AI_MESSAGE.content,
+      content,
       sender:  INITIAL_AI_MESSAGE.sender,
+      user_id: userId,
     })
     logWrite('chat_messages', 'seed', error)
   }
 
   async function seedChecklist() {
-    // Build all category and item rows up-front
     const catRows = DEFAULT_CATEGORIES.map((cat, ci) => ({
       id:       cat.id,
       label:    cat.label,
       icon:     cat.icon  ?? null,
       color:    cat.color ?? null,
       position: ci,
+      user_id:  userId,
     }))
 
     const itemRows = DEFAULT_CATEGORIES.flatMap(cat =>
@@ -140,9 +189,7 @@ export function WeddingProvider({ children }) {
         category_id:   cat.id,
         title:         item.title,
         done:          false,
-        // months_before is INTEGER in DB — round any fractional values (0.25, 0.5, 1.5 etc.)
         months_before: item.monthsBefore != null ? Math.round(item.monthsBefore) : null,
-        // dueDate may be undefined or null — never pass empty string to DATE column
         due_date:      item.dueDate || null,
         assigned_to:   item.assignedTo    ?? 'Both',
         from_ai:       false,
@@ -150,6 +197,7 @@ export function WeddingProvider({ children }) {
         item_note:     null,
         sub_q_notes:   {},
         position:      ii,
+        user_id:       userId,
       }))
     )
 
@@ -158,34 +206,30 @@ export function WeddingProvider({ children }) {
     logWrite('checklist_categories', 'seed', catErr)
 
     // Items have FK → categories, so they must go after
-    console.log('[Vowed] Inserting checklist items:', JSON.stringify(itemRows.map(r => ({ id: r.id, months_before: r.months_before, position: r.position })), null, 2))
     console.log('[Vowed] Seeding', itemRows.length, 'checklist items...')
     const { error: itemsErr } = await supabase.from('checklist_items').upsert(itemRows, { onConflict: 'id' })
     logWrite('checklist_items', 'seed', itemsErr)
   }
 
   async function seedItems() {
-    // Called when categories exist but items are missing (partial seeding recovery)
     const itemRows = DEFAULT_CATEGORIES.flatMap(cat =>
       cat.items.map((item, ii) => ({
         id:            item.id,
         category_id:   cat.id,
         title:         item.title,
         done:          false,
-        // months_before is INTEGER in DB — round any fractional values (0.25, 0.5, 1.5 etc.)
         months_before: item.monthsBefore != null ? Math.round(item.monthsBefore) : null,
-        due_date:      item.dueDate || null,   // never send empty string to DATE column
+        due_date:      item.dueDate || null,
         assigned_to:   item.assignedTo    ?? 'Both',
         from_ai:       false,
         sub_questions: item.subQuestions  ?? [],
         item_note:     null,
         sub_q_notes:   {},
         position:      ii,
+        user_id:       userId,
       }))
     )
-    console.log('[Vowed] Inserting checklist items:', JSON.stringify(itemRows.map(r => ({ id: r.id, months_before: r.months_before, position: r.position })), null, 2))
     console.log('[Vowed] Re-seeding', itemRows.length, 'checklist items (categories already exist)...')
-    // upsert so any partially-inserted rows get overwritten cleanly
     const { error } = await supabase.from('checklist_items').upsert(itemRows, { onConflict: 'id' })
     logWrite('checklist_items', 'seed-repair', error)
   }
@@ -198,57 +242,45 @@ export function WeddingProvider({ children }) {
       category:     v.category    ?? '',
       total_cost:   v.totalCost   ?? 0,
       deposit_paid: v.depositPaid ?? 0,
-      // v.dueDate may be '' (empty string) — || null converts that to null for the DATE column
       due_date:     v.dueDate     || null,
       assigned_to:  v.assignedTo  ?? 'Both',
       from_ai:      false,
       ai_updated:   false,
       position:     i,
+      user_id:      userId,
     }))
     const { error } = await supabase.from('vendors').insert(rows)
     logWrite('vendors', 'seed', error)
-  }
-
-  // ── Diagnostics — runs first, tells us exactly what's wrong ─────────────────
-  async function runDiagnostics() {
-    console.group('[Vowed] ══ DIAGNOSTICS ══')
-
-    // 1. Read categories — exactly as requested
-    const { data: cats, error: catsError } = await supabase
-      .from('checklist_categories')
-      .select('*')
-    console.log('Categories in DB:', cats, catsError)
-
-    // 2a. Test insert using the schema the user specified (name column)
-    //     This will likely fail with "column name does not exist" — that's useful info
-    const { data: testA, error: errorA } = await supabase
-      .from('checklist_categories')
-      .insert({ name: 'Test Category', icon: '🧪', position: 0 })
-      .select()
-    console.log('Insert result (name col):', testA, errorA)
-
-    // 2b. Test insert using the ACTUAL schema (label + id required)
-    const { data: testB, error: errorB } = await supabase
-      .from('checklist_categories')
-      .insert({ id: 'diag-test-1', label: 'Diagnostics Test', icon: null, color: null, position: 99 })
-      .select()
-    console.log('Insert result (label col):', testB, errorB)
-
-    // 3. Clean up the test row so it doesn't corrupt real data
-    if (testB?.length) {
-      await supabase.from('checklist_categories').delete().eq('id', 'diag-test-1')
-      console.log('Test row cleaned up')
-    }
-
-    console.groupEnd()
   }
 
   // ── loadFromSupabase — runs once on mount ─────────────────────────────────────
   async function loadFromSupabase() {
     console.log('[Vowed] ══ Starting data load ══')
 
-    // Run diagnostics first — helps pinpoint exactly where things fail
-    await runDiagnostics()
+    // ── Step 0: migrate existing data (user_id IS NULL) to this user ──────────
+    // This runs once the first time an existing user signs in after auth was added.
+    // Safe to skip if user_id column doesn't exist yet (caught below).
+    try {
+      const { count: unmigratedCount } = await supabase
+        .from('couple_profile')
+        .select('id', { count: 'exact', head: true })
+        .is('user_id', null)
+
+      if (unmigratedCount > 0) {
+        console.log('[Vowed] Migrating', unmigratedCount, 'legacy row(s) to current user...')
+        await Promise.all([
+          supabase.from('couple_profile')       .update({ user_id: userId }).is('user_id', null),
+          supabase.from('chat_messages')        .update({ user_id: userId }).is('user_id', null),
+          supabase.from('checklist_categories') .update({ user_id: userId }).is('user_id', null),
+          supabase.from('checklist_items')      .update({ user_id: userId }).is('user_id', null),
+          supabase.from('calendar_events')      .update({ user_id: userId }).is('user_id', null),
+          supabase.from('vendors')              .update({ user_id: userId }).is('user_id', null),
+        ])
+        console.log('[Vowed] Migration complete')
+      }
+    } catch (migErr) {
+      console.warn('[Vowed] Migration check skipped:', migErr.message)
+    }
 
     try {
       // ── Step 1: check every table count in ONE parallel round-trip ─────────
@@ -256,15 +288,15 @@ export function WeddingProvider({ children }) {
       const [
         { count: profileCount, error: profCountErr },
         { count: msgsCount    },
-        { count: catsCount,  error: catsCountErr  },
+        { count: catsCount    },
         { count: itemsCount   },
         { count: vendorsCount },
       ] = await Promise.all([
-        supabase.from('couple_profile')       .select('id', { count: 'exact', head: true }),
-        supabase.from('chat_messages')        .select('id', { count: 'exact', head: true }),
-        supabase.from('checklist_categories') .select('id', { count: 'exact', head: true }),
-        supabase.from('checklist_items')      .select('id', { count: 'exact', head: true }),
-        supabase.from('vendors')              .select('id', { count: 'exact', head: true }),
+        supabase.from('couple_profile')       .select('id', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('chat_messages')        .select('id', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('checklist_categories') .select('id', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('checklist_items')      .select('id', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('vendors')              .select('id', { count: 'exact', head: true }).eq('user_id', userId),
       ])
 
       console.log('[Vowed] Table counts:', {
@@ -276,40 +308,20 @@ export function WeddingProvider({ children }) {
       })
 
       if (profCountErr) {
-        console.error('[Vowed] ❌ Cannot read tables. Most likely cause: RLS is enabled.')
-        console.error('  Fix: run in Supabase SQL Editor:')
-        console.error("  ALTER TABLE couple_profile DISABLE ROW LEVEL SECURITY;")
-        console.error("  ALTER TABLE chat_messages DISABLE ROW LEVEL SECURITY;")
-        console.error("  ALTER TABLE checklist_categories DISABLE ROW LEVEL SECURITY;")
-        console.error("  ALTER TABLE checklist_items DISABLE ROW LEVEL SECURITY;")
-        console.error("  ALTER TABLE calendar_events DISABLE ROW LEVEL SECURITY;")
-        console.error("  ALTER TABLE vendors DISABLE ROW LEVEL SECURITY;")
-        console.error("  GRANT ALL ON couple_profile TO anon;")
-        console.error("  GRANT ALL ON chat_messages TO anon;")
-        console.error("  GRANT ALL ON checklist_categories TO anon;")
-        console.error("  GRANT ALL ON checklist_items TO anon;")
-        console.error("  GRANT ALL ON calendar_events TO anon;")
-        console.error("  GRANT ALL ON vendors TO anon;")
-        console.error('  Full error:', profCountErr)
+        console.error('[Vowed] ❌ Cannot read tables:', profCountErr.message)
       }
 
       // ── Step 2: seed each table independently based on what's actually empty ─
-      // profile, messages, vendors, and checklist all seed in parallel.
-      // Inside seedChecklist: categories must go before items (FK constraint).
       const seedTasks = []
-      if (!profileCount) seedTasks.push(seedProfile())
-      if (!msgsCount)    seedTasks.push(seedMessages())
+      if (!profileCount) seedTasks.push(seedProfile(initialProfile))
+      if (!msgsCount)    seedTasks.push(seedMessages(initialProfile))
       if (!vendorsCount) seedTasks.push(seedVendors())
 
-      // Checklist: seed both cats+items if cats empty; seed only items if cats exist but items missing.
-      // If items are missing entirely (failed integer-type error), purge categories first so
-      // seedChecklist() starts from a clean slate (FK constraint requires cats before items).
       if (!catsCount) {
         seedTasks.push(seedChecklist())
       } else if (!itemsCount) {
-        // Categories exist but items don't — wipe cats so seedChecklist re-inserts both cleanly
         console.log('[Vowed] Purging stale checklist_categories to re-seed from scratch...')
-        await supabase.from('checklist_categories').delete().neq('id', '')
+        await supabase.from('checklist_categories').delete().eq('user_id', userId).neq('id', '')
         seedTasks.push(seedChecklist())
       }
 
@@ -331,12 +343,12 @@ export function WeddingProvider({ children }) {
         { data: dbEvents,  error: eventsErr },
         { data: dbVendors, error: vendErr   },
       ] = await Promise.all([
-        supabase.from('couple_profile')       .select('*').order('created_at', { ascending: true }).limit(1),
-        supabase.from('chat_messages')        .select('*').order('created_at', { ascending: true }),
-        supabase.from('checklist_categories') .select('*').order('position',   { ascending: true }),
-        supabase.from('checklist_items')      .select('*').order('position',   { ascending: true }),
-        supabase.from('calendar_events')      .select('*').order('event_date', { ascending: true }),
-        supabase.from('vendors')              .select('*').order('position', { ascending: true }).order('created_at', { ascending: true }),
+        supabase.from('couple_profile')       .select('*').eq('user_id', userId).order('created_at', { ascending: true }).limit(1),
+        supabase.from('chat_messages')        .select('*').eq('user_id', userId).order('created_at', { ascending: true }),
+        supabase.from('checklist_categories') .select('*').eq('user_id', userId).order('position',   { ascending: true }),
+        supabase.from('checklist_items')      .select('*').eq('user_id', userId).order('position',   { ascending: true }),
+        supabase.from('calendar_events')      .select('*').eq('user_id', userId).order('event_date', { ascending: true }),
+        supabase.from('vendors')              .select('*').eq('user_id', userId).order('position',   { ascending: true }).order('created_at', { ascending: true }),
       ])
 
       logRead('couple_profile',       profiles,  profErr)
@@ -352,11 +364,15 @@ export function WeddingProvider({ children }) {
       const profile = profiles?.[0]
       if (profile) {
         profileIdRef.current = profile.id
+        if (profile.bride_name)            setBrideName(profile.bride_name)
+        if (profile.groom_name)            setGroomName(profile.groom_name)
         if (profile.wedding_date)          setWeddingDate(profile.wedding_date)
         if (profile.wedding_location)      setWeddingLocation(profile.wedding_location)
         if (profile.guest_count != null)   setGuestCount(profile.guest_count)
         if (profile.wedding_style?.length) setWeddingStyle(profile.wedding_style)
-        if (profile.budget)                setBudget(profile.budget)
+        if (profile.budget != null)        setBudget(profile.budget)
+        // Initialise activeUser from bride name
+        setActiveUser(prev => prev ?? (profile.bride_name || null))
       }
 
       // chat_messages
@@ -454,6 +470,7 @@ export function WeddingProvider({ children }) {
       sender:         message.sender        ?? null,
       is_error:       message.isError       ?? false,
       was_researched: message.wasResearched ?? false,
+      user_id:        userId,
     })
     logWrite('chat_messages', `${message.role} msg`, error)
   }
@@ -480,6 +497,7 @@ export function WeddingProvider({ children }) {
         phone:       event.phone      ?? null,
         url:         event.url        ?? null,
         notes:       event.notes      ?? null,
+        user_id:     userId,
       }
       console.log('[Vowed] WRITE calendar_events (add):', event.title)
       supabase.from('calendar_events').insert(row)
@@ -507,12 +525,12 @@ export function WeddingProvider({ children }) {
         category:     vendor.category    ?? '',
         total_cost:   vendor.totalCost   ?? 0,
         deposit_paid: vendor.depositPaid ?? 0,
-        due_date:     vendor.dueDate     || null,   // '' → null for DATE column
+        due_date:     vendor.dueDate     || null,
         assigned_to:  vendor.assignedTo  ?? 'Both',
         from_ai:      vendor.fromAI      ?? false,
         ai_updated:   vendor.aiUpdated   ?? false,
-        // position = current count before this vendor was added (ref still has old array)
         position:     vendorsRef.current.length,
+        user_id:      userId,
       }
       console.log('[Vowed] WRITE vendors (add):', vendor.name)
       supabase.from('vendors').insert(row)
@@ -549,7 +567,6 @@ export function WeddingProvider({ children }) {
   }
 
   function reorderVendors(orderedVendors) {
-    // Stamp each vendor with its new 0-based position, then persist in parallel
     const withPositions = orderedVendors.map((v, i) => ({ ...v, position: i }))
     setVendors(withPositions)
     if (dbReadyRef.current) {
@@ -564,6 +581,42 @@ export function WeddingProvider({ children }) {
         )
       )
     }
+  }
+
+  // ── Account actions ───────────────────────────────────────────────────────────
+
+  function signOut() {
+    return supabase.auth.signOut()
+  }
+
+  // Explicit save — used by SettingsPanel for immediate confirmation
+  async function saveProfile(changes) {
+    if (!profileIdRef.current) return { error: new Error('No profile loaded yet') }
+    const payload = {}
+    if (changes.brideName       !== undefined) payload.bride_name       = changes.brideName       || null
+    if (changes.groomName       !== undefined) payload.groom_name       = changes.groomName       || null
+    if (changes.weddingDate     !== undefined) payload.wedding_date     = changes.weddingDate     || null
+    if (changes.weddingLocation !== undefined) payload.wedding_location = changes.weddingLocation || null
+    if (changes.guestCount      !== undefined) payload.guest_count      = changes.guestCount
+    if (changes.weddingStyle    !== undefined) payload.wedding_style    = changes.weddingStyle
+    if (changes.budget          !== undefined) payload.budget           = changes.budget
+    console.log('[Vowed] WRITE couple_profile (explicit save):', payload)
+    const { error } = await supabase.from('couple_profile').update(payload).eq('id', profileIdRef.current)
+    logWrite('couple_profile', 'explicit save', error)
+    return { error }
+  }
+
+  // Re-authenticate then update password
+  async function changePassword(currentPassword, newPassword) {
+    if (!userEmail) return { error: new Error('No email on session') }
+    const { error: reAuthErr } = await supabase.auth.signInWithPassword({
+      email:    userEmail,
+      password: currentPassword,
+    })
+    if (reAuthErr) return { error: { message: 'Invalid login credentials' } }
+    const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword })
+    if (updateErr) console.error('[Vowed] changePassword update error:', updateErr.message)
+    return { error: updateErr }
   }
 
   // ── Alert actions ─────────────────────────────────────────────────────────────
@@ -649,7 +702,6 @@ ${transcript}`
   // ── Checklist actions ─────────────────────────────────────────────────────────
 
   function toggleItem(categoryId, itemId) {
-    // Read current done value from ref — no stale closure, no setTimeout hack
     const cat     = categoriesRef.current.find(c => c.id === categoryId)
     const item    = cat?.items.find(i => i.id === itemId)
     if (!item) return
@@ -701,7 +753,6 @@ ${transcript}`
         category_id:   categoryId,
         title:         item.title,
         done:          item.done          ?? false,
-        // months_before is INTEGER in DB — round any fractional values
         months_before: item.monthsBefore != null ? Math.round(item.monthsBefore) : null,
         due_date:      item.dueDate       ?? null,
         assigned_to:   item.assignedTo    ?? 'Both',
@@ -710,6 +761,7 @@ ${transcript}`
         item_note:     item.itemNote      ?? null,
         sub_q_notes:   item.subQNotes     ?? {},
         position,
+        user_id:       userId,
       }
       console.log('[Vowed] WRITE checklist_items (add):', item.title, 'in', categoryId)
       supabase.from('checklist_items').insert(row)
@@ -771,6 +823,7 @@ ${transcript}`
         icon:     category.icon  ?? null,
         color:    category.color ?? null,
         position,
+        user_id:  userId,
       }
       console.log('[Vowed] WRITE checklist_categories (add):', category.label)
       supabase.from('checklist_categories').insert(row)
@@ -815,7 +868,7 @@ ${transcript}`
       fromAI:       true,
     }
 
-    addItem(s.categoryId, newItem)  // addItem handles state + DB
+    addItem(s.categoryId, newItem)
     setChecklistSuggestions(prev => prev.filter(x => x.id !== suggestionId))
   }
 
@@ -863,7 +916,7 @@ ${transcript}`
       "categoryId": "one of: venue|photography|videography|florals|catering|music|beauty|attire|guests|honeymoon|logistics",
       "title": "specific actionable task title (max 10 words)",
       "dueDate": "YYYY-MM-DD or null",
-      "assignedTo": "JungMin|Jin Won|Both",
+      "assignedTo": "${brideName || 'Bride'}|${groomName || 'Groom'}|Both",
       "reason": "one sentence explaining why this task is relevant"
     }
   ]
@@ -966,6 +1019,7 @@ ${recentContext}`
               event_type:  e.type,
               assigned_to: e.assignedTo,
               from_ai:     true,
+              user_id:     userId,
             }))
           ).then(({ error }) => logWrite('calendar_events', 'AI batch add', error))
         }
@@ -1024,7 +1078,7 @@ ${recentContext}`
               categoryId: item.categoryId,
               title:      item.title,
               dueDate:    item.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate) ? item.dueDate : null,
-              assignedTo: ['JungMin','Jin Won','Both'].includes(item.assignedTo) ? item.assignedTo : 'Both',
+              assignedTo: item.assignedTo || 'Both',
               reason:     item.reason || '',
             })
           }
@@ -1103,6 +1157,8 @@ ${recentContext}`
         activeUser,    setActiveUser,
         messages,        setMessages,
         pendingQuestion, setPendingQuestion,
+        brideName,       setBrideName,
+        groomName,       setGroomName,
         weddingDate,     setWeddingDate,
         weddingLocation, setWeddingLocation,
         guestCount,      setGuestCount,
@@ -1120,6 +1176,10 @@ ${recentContext}`
         discussWithAI,
         extractAndUpdate,
         persistMessage,
+        userEmail,
+        signOut,
+        saveProfile,
+        changePassword,
       }}
     >
       {children}

@@ -454,7 +454,9 @@ function RenameCategoryModal({ category, onClose }) {
 // ─── Edit task modal ───────────────────────────────────────────────────────────
 
 function EditTaskModal({ item, categoryId, onClose }) {
-  const { updateItem, weddingDate } = useWedding()
+  const { updateItem, weddingDate, brideName, groomName } = useWedding()
+  const bride = brideName || 'Bride'
+  const groom = groomName || 'Groom'
   const [title,      setTitle]      = useState(item.title)
   const [assignedTo, setAssignedTo] = useState(item.assignedTo ?? 'Both')
 
@@ -590,7 +592,7 @@ function EditTaskModal({ item, categoryId, onClose }) {
         <div className="mb-6">
           <label className="block text-xs font-medium mb-1.5" style={{ color: '#8C8480' }}>Assign to</label>
           <div className="flex gap-2">
-            {['JungMin', 'Jin Won', 'Both'].map(name => {
+            {[bride, groom, 'Both'].map(name => {
               const active = assignedTo === name
               return (
                 <button
@@ -794,7 +796,9 @@ const DEADLINE_OPTIONS = [
 ]
 
 function AddTaskInline({ categoryId }) {
-  const { addItem } = useWedding()
+  const { addItem, brideName, groomName } = useWedding()
+  const bride = brideName || 'Bride'
+  const groom = groomName || 'Groom'
   const [active,     setActive]     = useState(false)
   const [title,      setTitle]      = useState('')
   const [deadline,   setDeadline]   = useState('flexible')
@@ -872,7 +876,7 @@ function AddTaskInline({ categoryId }) {
         </select>
 
         {/* Assign to */}
-        {['JungMin', 'Jin Won', 'Both'].map(name => (
+        {[bride, groom, 'Both'].map(name => (
           <button
             key={name}
             type="button"
