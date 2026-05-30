@@ -79,7 +79,7 @@ export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined)
 
   // Which top-level view
-  const [view,    setView]    = useState('signin') // 'signin' | 'forgot' | 'onboarding'
+  const [view,    setView]    = useState('signin') // 'signin' | 'forgot' | 'onboarding' | 'confirm-email'
   const [step,    setStep]    = useState(1)        // 1 | 2 | 3 (onboarding only)
 
   // Onboarding data (all 3 steps consolidated)
@@ -195,12 +195,16 @@ export default function AuthGate({ children }) {
       }))
     } catch (_) {}
 
-    const { error: err } = await supabase.auth.signUp({ email: od.email, password: od.password })
+    const { data, error: err } = await supabase.auth.signUp({ email: od.email, password: od.password })
     if (err) {
       localStorage.removeItem('vowed_pending_profile')
       shakeError(err.message)
+    } else if (data?.session) {
+      // Email confirmation not required — onAuthStateChange fires and logs them in automatically
+    } else {
+      // Email confirmation required — show the "check your email" screen
+      toView('confirm-email')
     }
-    // On success: onAuthStateChange fires → session is set → children() renders
     setSubmitting(false)
   }
 
@@ -375,6 +379,38 @@ export default function AuthGate({ children }) {
                   ← Back to sign in
                 </button>
               </form>
+            </>
+          )}
+
+          {/* ── CONFIRM EMAIL ── */}
+          {view === 'confirm-email' && (
+            <>
+              <div style={{ fontSize: '48px', lineHeight: 1, marginBottom: '20px' }}>📩</div>
+              <h2 style={{ fontFamily: 'var(--font-heading)', color: '#FDFAF8', fontSize: '32px',
+                           fontWeight: 300, fontStyle: 'italic', lineHeight: 1.2, margin: '0 0 16px' }}>
+                Check your email
+              </h2>
+              <p style={{ color: 'rgba(253,250,248,0.55)', fontFamily: 'var(--font-body)',
+                          fontSize: '14px', lineHeight: 1.6, margin: '0 0 8px' }}>
+                We sent a confirmation link to
+              </p>
+              <p style={{ color: '#E8A4B5', fontFamily: 'var(--font-body)',
+                          fontSize: '14px', fontWeight: 500, margin: '0 0 24px', wordBreak: 'break-all' }}>
+                {od.email}
+              </p>
+              <p style={{ color: 'rgba(253,250,248,0.40)', fontFamily: 'var(--font-body)',
+                          fontSize: '13px', lineHeight: 1.6, margin: '0 0 32px' }}>
+                Click the link in that email to activate your account, then come back here to sign in.
+              </p>
+              <button
+                type="button"
+                onClick={() => toView('signin')}
+                style={btnPrimary}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#C97B90' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#B4627A' }}
+              >
+                Back to Sign In
+              </button>
             </>
           )}
 
