@@ -99,6 +99,11 @@ export default function AuthGate({ children }) {
   // Forgot-password form
   const [fpEmail, setFpEmail] = useState('')
 
+  // Password recovery state
+  const [isRecovery, setIsRecovery] = useState(false)
+  const [rpPassword, setRpPassword] = useState('')
+  const [rpConfirm,  setRpConfirm]  = useState('')
+
   // Shared UI states
   const [submitting, setSubmitting] = useState(false)
   const [error,      setError]      = useState('')
@@ -110,14 +115,14 @@ export default function AuthGate({ children }) {
   // ── Supabase session listener ─────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session ?? null))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setIsRecovery(true)
       setSession(session ?? null)
     })
     return () => subscription.unsubscribe()
   }, [])
 
   if (session === undefined) return <LoadingScreen />
-  if (session) return children(session.user.id, session.user.email)
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function shakeError(msg) {
@@ -208,6 +213,26 @@ export default function AuthGate({ children }) {
     setSubmitting(false)
   }
 
+  // ── Reset password (recovery flow) ───────────────────────────────────────
+  async function handleResetPassword(e) {
+    e.preventDefault()
+    if (!rpPassword || !rpConfirm)      { shakeError('Please fill in both fields'); return }
+    if (rpPassword !== rpConfirm)        { shakeError('Passwords do not match'); return }
+    if (rpPassword.length < 6)           { shakeError('Password must be at least 6 characters'); return }
+    setSubmitting(true); setError('')
+    const { error: err } = await supabase.auth.updateUser({ password: rpPassword })
+    if (err) {
+      shakeError(err.message)
+    } else {
+      await supabase.auth.signOut()
+      setIsRecovery(false)
+      setRpPassword(''); setRpConfirm('')
+      setSuccess('Password updated! Please sign in.')
+      toView('signin')
+    }
+    setSubmitting(false)
+  }
+
   // ── Shared styles ─────────────────────────────────────────────────────────
   const inputBase = {
     width:           '100%',
@@ -264,6 +289,56 @@ export default function AuthGate({ children }) {
       {error}
     </p>
   )
+
+  // ── Password recovery screen ──────────────────────────────────────────────
+  if (session && isRecovery) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, backgroundColor: '#1C1410', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      minHeight: '100%', padding: '32px 24px' }}>
+          <div style={{ animation: 'vovedFadeIn 0.35s ease-out forwards', opacity: 0,
+                        width: '100%', maxWidth: '340px', textAlign: 'center' }}>
+            <p style={{ color: '#B4627A', fontFamily: 'var(--font-body)', fontWeight: 500, fontSize: '10px',
+                        letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
+              Wedding Planner
+            </p>
+            <h1 style={{ fontFamily: 'var(--font-heading)', color: '#FDFAF8', fontSize: '52px',
+                         fontWeight: 300, fontStyle: 'italic', lineHeight: 1, margin: '0 0 10px' }}>
+              Vowed
+            </h1>
+            <p style={{ color: 'rgba(253,250,248,0.35)', fontFamily: 'var(--font-body)',
+                        fontSize: '13px', margin: '0 0 32px' }}>
+              Create new password
+            </p>
+
+            <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <input
+                type="password" autoFocus placeholder="New password"
+                value={rpPassword}
+                onChange={e => { setRpPassword(e.target.value); setError('') }}
+                style={centeredInput()}
+              />
+              <input
+                type="password" placeholder="Confirm new password"
+                value={rpConfirm}
+                onChange={e => { setRpConfirm(e.target.value); setError('') }}
+                style={centeredInput(true)}
+              />
+              {errBlock}
+              <button type="submit" disabled={submitting} style={{ ...btnPrimary, marginTop: '4px' }}
+                onMouseEnter={e => { if (!submitting) e.currentTarget.style.backgroundColor = '#C97B90' }}
+                onMouseLeave={e => { if (!submitting) e.currentTarget.style.backgroundColor = '#B4627A' }}>
+                {submitting ? 'Updating…' : 'Update Password'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Normal authenticated session → render app ─────────────────────────────
+  if (session) return children(session.user.id, session.user.email)
 
   // ── Outer wrapper ─────────────────────────────────────────────────────────
   return (
