@@ -149,7 +149,7 @@ export default function AuthGate({ children }) {
     if (!fpEmail) { shakeError('Enter your email address first'); return }
     setSubmitting(true); setError('')
     const { error: err } = await supabase.auth.resetPasswordForEmail(fpEmail, {
-      redirectTo: window.location.origin,
+      redirectTo: 'https://vowed-ochre.vercel.app',
     })
     if (err) shakeError(err.message)
     else setSuccess('Reset link sent — check your email.')
